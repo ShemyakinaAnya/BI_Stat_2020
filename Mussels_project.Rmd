@@ -1,0 +1,462 @@
+---
+title: "How old is the mussel"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+```
+
+Libraries required for report's functioning
+```{r}
+library(dplyr)
+library(ggplot2)
+library(cowplot)
+library(corrplot)
+```
+
+*Versions of R and packages used:*<br/>
+R version 3.6.3<br/>
+dplyr_1.0.2<br/>
+ggplot2_3.3.2<br/>
+cowplot_1.1.0<br/>
+corrplot_0.84<br/>
+
+## Introduction
+
+This report is about statistical analysis of data containing dimensional and weight characteristics of mussels. The analyzed data set of 4177 observations was collected in the 2020 expedition. It contains such spatial characteristics of mussels as length, diameter and height, weight characteristics such as whole weight, shucked weight, viscera weight and shell weight, as well as mussel's gender (male, female, juvenile) and a number of rings reflecting mussel's age.
+
+## Data processing
+
+### 1. Data gathering
+
+Custom function for data gathering from multiple csv files in given directory:
+```{r}
+gather_data <- function(path){
+  data <- data.frame()
+  list_of_files <- list.files(path)
+  number_of_files <- length(list.files(path))
+  for (i in 1:number_of_files){
+    table <- read.csv(paste(path,list_of_files[i], sep = ""))
+    data <- rbind(data,table)
+  }
+  return (data)
+}
+
+path <- '/home/haletod/R_BI_2020_2021/Mussles/input_data/'
+data_mussel <- gather_data(path)
+# please insert absolute path to your directory with raw data in csv format
+```
+
+### 2. Data cleaning
+
+#### First-look analysis of data obtained:
+
+```{r}
+str(data_mussel)
+```
+
+From str() output one can conclude such errors as<br/> 
+* incorrect variable's naming<br/>
+* incorrect variable's format<br/>
+* incorrect factor variable's values
+
+In the present data set Sex variable is missing its labels while containing them in variable's name. Furthermore, types of Sex, Rings and Length variables are character while should be factor, integer and numeric, respectfully.
+
+#### Correction of Sex variable's name:
+```{r}
+colnames(data_mussel)[2] <- "Sex"
+```
+
+#### Checking for "comment" values:
+
+In process of format converting some values can be lost because they were written as text instead on number or contain some comment, for example. Thus, before correcting formats it may be useful to check if any values were written incorrectly, but could still be read by human.
+
+Extract "comment" values, if any:
+```{r}
+find_comment_values <- function(list){
+  comment_values <- levels(factor(list))[is.na(as.numeric(levels(factor(list))))]
+  return (comment_values)
+}
+
+print(apply(data_mussel, 2, find_comment_values))
+```
+
+Found comment values require manual correction:
+```{r}
+data_mussel$Rings[data_mussel$Rings == "nine"] <- "9"
+data_mussel$Sex[data_mussel$Sex == "male"] <- "1"
+data_mussel$Sex[data_mussel$Sex == "one"] <- "1"
+data_mussel$Sex[data_mussel$Sex == "three"] <- "3"
+data_mussel$Length[data_mussel$Length == "No data! I forgot to mesure it!("] <- NA
+```
+
+#### Correction of variables' formats:
+
+Sex variable should be set as factorial. Type of Length variable should be set to numeric. Rings variable will be set as integer, not factorial, so it can be used in further calculations.
+```{r}
+data_mussel$Rings <- as.integer(data_mussel$Rings)
+data_mussel$Sex <- factor(data_mussel$Sex, labels = c("male", "female", "juvenile"))
+data_mussel$Length <- as.numeric(data_mussel$Length)
+```
+
+Let's make sure all corrections are correct:
+```{r}
+str(data_mussel)
+```
+
+
+#### Solving NA problem 
+
+Data set contains not available (NA) values, that can hinder further calculations.
+```{r}
+print(colSums(is.na(data_mussel)))
+```
+
+NA values of Sex and Rings variables require removing of corresponding observation as there is low probability to correctly predict their values. Fortunately this step requires removing of single observation.
+
+```{r}
+data_mussel <- data_mussel[!is.na(data_mussel$Sex),]
+data_mussel <- data_mussel[!is.na(data_mussel$Rings),]
+```
+
+NA values of numeric variables can be substituted by mean values of variable in minimal corresponding group formed by Sex and Rings variables.
+```{r}
+impute <- function(DF, col, i) {
+  selec <- DF$Sex == DF$Sex[i] & DF$Rings == DF$Rings[i]
+  imputed <- mean(DF[,col][selec], na.rm = T)
+  if (is.nan(imputed)) {
+    imputed <- NA
+  }
+  return(imputed)
+}
+
+for (col in 3:9){                                     
+  for (j_NA in which(is.na(data_mussel[, col]))) {
+    data_mussel[,col][j_NA] <- impute(data_mussel, col, j_NA)
+  }
+}
+```
+
+Now the data set is well organized and free of NA.
+```{r}
+print(colSums(is.na(data_mussel)))
+```
+
+### 3. Data visualising
+
+#### Primary exploratory data analysis & outliers removal
+
+The exploratory data analysis (EDA) allows to perform initial investigations on data so as to discover patterns, to spot anomalies, to check assumptions, etc. Let's visualize all countable data with box plots - non-parametric plot that allows to assess the presence of outliers and estimate to some extent the type of distribution of the variable (fig. 1).
+
+```{r}
+Re_bp <- ggplot(data_mussel, aes(y = Rings))+
+  geom_boxplot()+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+Le_bp <- ggplot(data_mussel, aes(y = Length))+
+  geom_boxplot()+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+Di_bp <- ggplot(data_mussel, aes(y = Diameter))+
+  geom_boxplot()+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+He_bp <- ggplot(data_mussel, aes(y = Height))+
+  geom_boxplot()+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+Ww_bp <- ggplot(data_mussel, aes(y = Whole_weight))+
+  geom_boxplot()+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())+
+  ylab("Whole weight")
+Suw_bp <- ggplot(data_mussel, aes(y = Shucked_weight))+
+  geom_boxplot()+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())+
+  ylab("Shucked weight")
+Vw_bp <- ggplot(data_mussel, aes(y = Viscera_weight))+
+  geom_boxplot()+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())+
+  ylab("Viscera weight")
+Sew_bp <- ggplot(data_mussel, aes(y = Shell_weight))+
+  geom_boxplot()+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())+
+  ylab("Shell weight")
+box_plots <- plot_grid(Re_bp, Le_bp, Di_bp, He_bp, Ww_bp, Suw_bp, Vw_bp, Sew_bp, nrow = 1, labels = "AUTO")
+bp_title <- ggdraw() +
+  draw_label("The variations of mussels' age, dimensional and weight parameters", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+bp_caption <- ggdraw() +
+  draw_text("Figure 1. Box plots of the distributions of mussels' parameters: rings (A); length (B), diameter (C) and height (D) \nof shell; whole (E), shucked (F), viscera (G) and shell (H) weights.", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+plot_grid(bp_title, box_plots, bp_caption, ncol = 1, rel_heights = c(0.1, 1, 0.1))
+```
+
+Two significant outliers (fig. 1D) can be seen in Height variable. Let us take a look at others parameters of these two mussels:
+```{r}
+Height_outliers  <-  data_mussel %>% slice_max(Height, n = 2)
+print(Height_outliers)
+```
+
+Neither of other parameters of these two mussels are outside of scope. Actually for the female it could be speculated that its Height was multiplied by ten by mistake as all its other parameters are less that average. Anyway these two observations do not make much sense, thus, need to be removed.
+
+```{r}
+data_mussel <- data_mussel[!(data_mussel$Height %in% Height_outliers$Height), ]
+```
+
+Update of figure 1:
+
+```{r}
+He_bp <- ggplot(data_mussel, aes(y = Height))+
+  geom_boxplot()+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+bp_caption2 <- ggdraw() +
+  draw_text("Figure 2. Box plots of the distributions of mussels' parameters: rings (A); length (B), diameter (C) and height (D); \nwhole (E), shucked (F), viscera (G) and shell (H) weights, with two extreme outliers of height dropped.", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+box_plots <- plot_grid(Re_bp, Le_bp, Di_bp, He_bp, Ww_bp, Suw_bp, Vw_bp, Sew_bp, nrow = 1, labels = "AUTO")
+plot_grid(bp_title, box_plots, bp_caption2, ncol = 1, rel_heights = c(0.1, 1, 0.1))
+```
+
+Now it becomes noticeable that distributions of variables representing dimensional parameters (Length, Height and Diameter) tend to be more normal than distributions of weight parameters' variables (fig. 2).
+A closer look reveals that dimensional variables have a slight left skew while weight variables have a significant skew to the right (fig. 3).
+```{r}
+dimentional_mussels_L <- data_mussel %>% select(Length) %>% mutate(parameter = "length")
+colnames(dimentional_mussels_L)[1] <- "value"
+dimentional_mussels_D <- data_mussel %>% select(Diameter) %>% mutate(parameter = "diameter")
+colnames(dimentional_mussels_D)[1] <- "value"
+dimentional_mussels_H <- data_mussel %>% select(Height) %>% mutate(parameter = "height")
+colnames(dimentional_mussels_H)[1] <- "value"
+dimentional_mussels <- rbind(dimentional_mussels_L, dimentional_mussels_D, dimentional_mussels_H)
+
+dim_hist <- ggplot(dimentional_mussels, aes(x=value, fill = parameter)) +
+  geom_histogram(alpha=0.5, position="identity", binwidth = 0.005)+
+  scale_fill_brewer(type = "qual", palette = 3)
+
+weight_mussels_W <- data_mussel %>% select(Whole_weight) %>% mutate(parameter = "whole weight")
+colnames(weight_mussels_W)[1] <- "value"
+weight_mussels_Su <- data_mussel %>% select(Shucked_weight) %>% mutate(parameter = "shucked weight")
+colnames(weight_mussels_Su)[1] <- "value"
+weight_mussels_V <- data_mussel %>% select(Viscera_weight) %>% mutate(parameter = "viscera weight")
+colnames(weight_mussels_V)[1] <- "value"
+weight_mussels_Se <- data_mussel %>% select(Shell_weight) %>% mutate(parameter = "shell weight")
+colnames(weight_mussels_Se)[1] <- "value"
+weight_mussels <- rbind(weight_mussels_W, weight_mussels_Su, weight_mussels_V, weight_mussels_Se)
+
+weight_hist <- ggplot(weight_mussels, aes(x=value, fill = parameter)) +
+  geom_histogram(alpha=0.5, position="identity", binwidth = 0.02)+
+  scale_fill_brewer(type = "qual", palette = 3)
+
+
+d_w_hist <- plot_grid(dim_hist, weight_hist, align = "v", ncol = 1, labels = "AUTO")
+d_w_hist_title <- ggdraw() +
+  draw_label("Skewed distributions of mussel's dimensional and weight parameters", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+d_w_hist_caption <- ggdraw() +
+  draw_text("Figure 3. A. Histograms of distributions of mussels' dimentional parameters: length, diameter and height of shell;  \nB. Histograms of distributions of mussels' weight parameters: whole, shucked, viscera and shell weights.", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+plot_grid(d_w_hist_title, d_w_hist, d_w_hist_caption, ncol = 1, rel_heights = c(0.1, 1, 0.1))
+```
+
+Box plots (fig. 2) show many insignificant outliers across all variables. An alternative way to remove outliers beside assessing the feasibility of the obtained measurements of individual animals is to use box plot whiskers as borders, for example. However, these data are not normally distributed, while the tails of the distributions decrease uniformly. It is especially visible in Rings distribution (see fig. 4A). Therefore, using such alternative method can lead to senseless deletion of data. Moreover, a large number of observations makes it possible to ignore insignificant outliers.
+
+#### EDA in view of factorial variables
+
+The next step in EDA will be to analyze the distributions of numerical variables by factorial ones (or which can be interpreted as factorial): sex (fig. 4, 5, 6) and rings (fig. 7, 8).
+
+In view of Rings variable:
+```{r}
+Rings_count <- ggplot(data_mussel, aes(x = Rings, fill = Sex)) +
+  geom_bar()+
+  scale_fill_brewer(type = "qual", palette = 3)
+Se_r <- ggplot(data_mussel, aes(Sex, Rings))+
+  geom_boxplot(aes(group = Sex))
+
+rings_plot1 <- plot_grid(Rings_count, Se_r, labels = "AUTO")
+rings_plot_title1 <- ggdraw() +
+  draw_label("EDA in view of Rings variable. I.", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+rings_plot_caption1 <- ggdraw() +
+  draw_text("Figure 4. A. Histogram of frequency distribution of mussels by ring count; \nB. Box plot of the distribution of mussels' ring parameter grouped by sex.", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+plot_grid(rings_plot_title1, rings_plot1, rings_plot_caption1, ncol = 1, rel_heights = c(0.1, 1, 0.1))
+
+
+Le_r <- ggplot(data_mussel, aes(Rings, Length))+
+  geom_boxplot(aes(group = Rings))
+Di_r <- ggplot(data_mussel, aes(Rings, Diameter))+
+  geom_boxplot(aes(group = Rings))
+He_r <- ggplot(data_mussel, aes(Rings, Height))+
+  geom_boxplot(aes(group = Rings))
+
+rings_plot2 <- plot_grid(Le_r, Di_r, He_r, labels = "AUTO")
+rings_plot_title2 <- ggdraw() +
+  draw_label("EDA in view of Rings variable. II.", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+rings_plot_caption2 <- ggdraw() +
+  draw_text("Figure 5. Box plots of the distributions of mussels' dimentional parameters: \nlength (A), diameter (B), height (C) of shell, all grouped by ring count.", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+plot_grid(rings_plot_title2, rings_plot2, rings_plot_caption2, ncol = 1, rel_heights = c(0.1, 1, 0.1))
+
+
+Ww_r <- ggplot(data_mussel, aes(Rings, Whole_weight))+
+  geom_boxplot(aes(group = Rings))+
+  ylab("Whole\nweight")
+Suw_r <- ggplot(data_mussel, aes(Rings, Shucked_weight))+
+  geom_boxplot(aes(group = Rings))+
+  ylab("Shucked\nweight")
+Vw_r <- ggplot(data_mussel, aes(Rings, Viscera_weight))+
+  geom_boxplot(aes(group = Rings))+
+  ylab("Viscera\nweight")
+Sew_r <- ggplot(data_mussel, aes(Rings, Shell_weight))+
+  geom_boxplot(aes(group = Rings))+
+  ylab("Shell\nweight")
+
+rings_plot3 <- plot_grid(Ww_r, Suw_r, Vw_r, Sew_r, labels = "AUTO")
+rings_plot_title3 <- ggdraw() +
+  draw_label("EDA in view of Rings variable. III.", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+rings_plot_caption3 <- ggdraw() +
+  draw_text("Figure 6. Box plots of the distributions of mussels' weight parameters: \nwhole (A), shucked (B), viscera (C) and shell (D) weights, all grouped by ring count.", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+plot_grid(rings_plot_title3, rings_plot3, rings_plot_caption3, ncol = 1, rel_heights = c(0.1, 1, 0.1))
+
+
+
+```
+
+It can be seen that physical growth of mussels stops around when 10th rings appears. A closer look at the period from 1 to 10 rings allows to speculate that the dimensional growth of animals is linear (fig. 5), while the increase in weight more resembles a power function (fig. 6).
+An abnormally low number of mussels with a low number of rings (fig. 4A) may indicate population extinction or serious inaccuracies in sampling technique.
+The obtained graphs cast doubt on the correctness of the term "juvenile" in the data set: the presence of "juvenile" animals with 15 rings or more and significant overlap with distributions of adult animals (fig. 4B) speaks in favor that the subset consists of true juvenile animals and animals for which sex determination failed. This assumption is supported by the known inaccuracy of the mussel's sex visual determination technique, which was probably used.
+
+In view of Sex variable:
+```{r}
+Sex_count <- ggplot(data_mussel, aes(x = Sex)) +
+  geom_bar()
+Le_s <- ggplot(data_mussel, aes(y = Length, x = Sex))+
+  geom_boxplot()
+Di_s <- ggplot(data_mussel, aes(y = Diameter, x = Sex))+
+  geom_boxplot()
+He_s <- ggplot(data_mussel, aes(y = Height, x = Sex))+
+  geom_boxplot()
+
+sex_plot1 <- plot_grid(Sex_count, Le_s, Di_s, He_s, labels = "AUTO")
+sex_plot_title1 <- ggdraw() +
+  draw_label("EDA in view of Sex variable. I.", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+sex_plot_caption1 <- ggdraw() +
+  draw_text("Figure 7. A. Histogram of frequency distribution of mussels by sex; B-D. Box plots of the distributions \nof mussels' dimentional parameters: length (B), diameter (C), height (D) of shell, grouped by sex.", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+plot_grid(sex_plot_title1, sex_plot1, sex_plot_caption1, ncol = 1, rel_heights = c(0.1, 1, 0.1))
+
+
+Ww_s <- ggplot(data_mussel, aes(y = Whole_weight, x = Sex))+
+  geom_boxplot()+
+  ylab("Whole\nweight")
+Suw_s <- ggplot(data_mussel, aes(y = Shucked_weight, x = Sex))+
+  geom_boxplot()+
+  ylab("Shucked\nweight")
+Vw_s <- ggplot(data_mussel, aes(y = Viscera_weight, x = Sex))+
+  geom_boxplot()+
+  ylab("Viscera\nweight")
+Sew_s <- ggplot(data_mussel, aes(y = Shell_weight, x = Sex))+
+  geom_boxplot()+
+  ylab("Shell\nweight")
+
+sex_plot2 <- plot_grid(Ww_s, Suw_s, Vw_s, Sew_s, labels = "AUTO")
+sex_plot_title2 <- ggdraw() +
+  draw_label("EDA in view of Sex variable. II.", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+sex_plot_caption2 <- ggdraw() +
+  draw_text("Figure 8. Box plots of the distributions of mussels' weight parameters: \nwhole (A), shucked (B), viscera (C) and shell (D) weights, all grouped by sex.", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+plot_grid(sex_plot_title2, sex_plot2, sex_plot_caption2, ncol = 1, rel_heights = c(0.1, 1, 0.1))
+```
+
+Despite previous remarks all physical parameters of juvenile mussels are less than adult mussels (fig. 7, 8). This proves that juvenile subset may be contaminated, but still is mostly composed of true juvenile animals. 
+There is no significant difference between female and male mussels across all physical parameters, though females appear to be slightly bigger and heavier.
+
+#### Primary search of correlations between variables
+
+```{r}
+cor_matrix <- cor(data_mussel[, -2])
+corrplot(cor_matrix, method = "ellipse", type = "upper", tl.col = "black", title = "Figure 9. Correlation plot of mussels parameters", mar=c(0,0,1,0), tl.srt = 45)
+
+```
+
+It looks like the most correlated variables are Length and Diameter, and also Whole weight is pairwise correlated with three other weight parameters (fig. 9). On the other hand Rings variable has relatively low correlations with other variables. On the whole, weight variables are more correlated with each other than dimensional ones. Perhaps spatial growth in three dimensions is subject to greater variability than weight growth, which is strictly limited by the food supply and other environmental factors.
+
+## Data statistical analysis
+
+### 1. Mean and standard deviation of the Length variable for mussels of different sexes
+
+```{r}
+data_mussel %>% group_by(Sex) %>% summarise(mean(Length), sd(Length))
+```
+
+### 2. The percentage of mussels with Height variable < 0.165
+
+```{r}
+length(which(data_mussel$Height < 0.165))/length(data_mussel$Height)*100
+```
+### 3. Length value, which is greater than 92% of all observations
+
+```{r}
+quantile(data_mussel$Length, probs = 0.93)
+```
+### 4. Standardized Length variable
+
+```{r}
+Len_mean <- mean(data_mussel$Length)
+Len_sd <- sd(data_mussel$Length)
+data_mussel <- data_mussel %>% rowwise() %>% mutate(Lenght_z_scores = (Length - Len_mean)/Len_sd)
+```
+
+Let's visualize standardized Length variable:
+```{r}
+ggplot(data_mussel, aes(x = Lenght_z_scores)) +
+  geom_histogram(color = "black", bins = 40)+
+  labs(title = "Standardized Length variable",
+              caption = "Figure 10. Histogram of standardized distribution of mussels' Length")+
+  theme(plot.caption = element_text(hjust = 0))
+```
+
+The distribution has the typical attribute of distribution of standardized variable such as mean equal to 0 (fig. 10).
+
+### 5. Comparison of Diameter of mussels with the number of rings 5 and 15
+
+```{r}
+data_Rings_5_15 <- data_mussel %>% select(Diameter, Rings) %>% filter(Rings == 5 | Rings == 15) %>% arrange(Rings) %>% mutate(Rings = factor(Rings))
+ggplot(data_Rings_5_15, aes(x = Rings, y = Diameter))+
+  geom_boxplot()+
+  labs(title = "The difference in diameter between mussels with 5 and 15 rings ",
+              caption = "Figure 11. Box plot of Diameter distribution of mussels with 5 and 15 rings")+
+  theme(plot.caption = element_text(hjust = 0))
+
+data_mussel %>% select(Diameter, Rings) %>% filter(Rings == 5 | Rings == 15) %>% group_by(Rings) %>% summarise(mean(Diameter))
+```
+
+Formally, the comparison of two samples requires the use of the Student’s t-test or its analogs. And though in this case the difference between the samples is conspicuous (fig. 11), just for the record, we will conduct a test.
+As the Student’s t-test requires that the distributions follow a normal distribution, it is necessary to conduct Shapiro–Wilk to check whether the 2 samples are distributed normally.
+
+```{r}
+data_Rings_5_15 <- data_mussel %>% select(Diameter, Rings) %>% filter(Rings == 5 | Rings == 15)
+test1 <- shapiro.test(subset(data_Rings_5_15, Rings == 5)$Diameter)
+test2 <- shapiro.test(subset(data_Rings_5_15, Rings == 15)$Diameter)
+```
+
+P-values of Shapiro–Wilk test for distributions of Diameter variable of mussels with 5 rings and 15 rings are `r test1$p.value` and `r test2$p.value`, respectively, which indicates that both samples are non normally distributed. That in turn in turn prohibits the use of parametric tests. Hence, the non-parametric Wilcoxon test will be used to compare samples instead of Student’s t-test.
+
+Let us form null and alternative hypotheses:
+H~0~: mussels with 5 and 15 rings do not differ in length
+H~1~: length of mussels with 5 rings is less than length of mussels with 15 rings
+
+```{r}
+W_test <- wilcox.test(data_Rings_5_15$Diameter ~ data_Rings_5_15$Rings, alternative = "less")
+```
+
+With p-value of `r W_test$p.value` we can reject null hypothesis at practically any significance level. Thus, the diameter of mussels with 5 and 15 rings differs significantly. This observation is consistent with the deduction about physical growth of mussels based on EDA: mussels grow until 10th ring appears. This means that animals with 5 rings are only in the middle of growth and can be 2 times smaller than adult animals, with 10 rings or more.
