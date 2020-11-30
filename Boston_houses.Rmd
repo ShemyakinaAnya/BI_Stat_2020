@@ -1,0 +1,623 @@
+---
+title: "Boston houses' value"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 4
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+```
+
+Libraries required for report's functioning
+```{r}
+library(MASS)
+library(dplyr)
+library(tidyr)
+library(car)
+library(ggplot2)
+library(GGally)
+library(cowplot)
+library(sure)
+```
+
+*Versions of R and packages used:*<br/>
+R version 3.6.3<br/>
+MASS_7.3-53<br/>
+dplyr_1.0.2<br/>
+car_3.0-10<br/>
+ggplot2_3.3.2<br/>
+GGally_2.0.0<br/>
+cowplot_1.1.0<br/>
+sure_0.2.0<br/>
+
+## Introduction
+
+This report analyses the value of houses in Boston depending on several factors using multiple linear regression.<br/>
+The following abbreviations denote corresponding variables that are used as predictors for building the model:<br/>
+
+**crim** - crime rate (-)<br/>
+**zn** - proportion of residential land zoned for lots over 25000 ft^2^ (+)<br/>
+**indus** - proportion of non-retail business acres per town (-)<br/>
+**chas** - Charles River dummy variable (1 if tract bounds river; 0 otherwise) (+)<br/>
+**nox** - nitric oxides concentration (-)<br/>
+**rm** - average number of rooms per dwelling (+)<br/>
+**age** - proportion of owner-occupied units built prior to 1940 (-)<br/>
+**dis** - weighted distances to five Boston employment centres (-)<br/>
+**rad** - index of accessibility to radial highways (+)<br/>
+**tax** - full-value property tax rate (-)<br/>
+**ptratio** - pupil-teacher ratio by town school district(-)<br/>
+**black** - proportion of black population (+)<br/>
+**lstat** - proportion of laborers and adults without education (-)<br/>
+
+*(the expected sign (+ or -) before the predictor is given in parentheses )<br/>*
+
+
+The notation of predicted variable:<br/>
+**medv** - median value of owner-occupied homes<br/>
+
+Data is obtained from data set 'Housing Values in Suburbs of Boston' from MASS package.
+
+## 1. Data processing and exploratory analysis
+
+Data structure:
+
+```{r}
+bostn <- data.frame(Boston)
+str(bostn)
+
+```
+
+Among 13 predictors two (**rad** and **chas**) are possibly categorical.
+
+```{r}
+colSums(is.na(bostn))
+```
+No missing values in dataset.
+
+
+### 1.1. Transformation of int variables to factors
+
+There are 2 variables that should be transformed to factors - **chas** and **rad**. Let's check how many levels there possibly can be after the transformation. 
+
+```{r}
+levels(factor(bostn$rad))
+levels(factor(bostn$chas))
+```
+ and what is the distribution of the variable.
+Chas can be readily transformed to factor as it has only 2 levels. As for rad, there will be 9 levels in **rad** factor variable. Let's check **rad** variable distribution.
+
+```{r}
+ggplot(bostn, aes(x = rad))+
+  geom_histogram(color = "black", bins = 40)+
+  labs(title = "Distribution of rad",
+              caption = "Figure 1. Distribution of index of accessibility to radial highways before factorization")+
+  theme(plot.caption = element_text(hjust = 0))
+```
+
+
+The distribution shows that, in principle, the **rad** variable as factor can be represented by two levels: below 15 and above. This transformation will significantly simplify model building.
+
+```{r}
+bostn$chas <- factor(bostn$chas)
+bostn$rad <- ifelse(bostn$rad < 15, '0', '1')
+bostn$rad <- factor(bostn$rad)
+str(bostn)
+```
+
+
+### 1.2. EDA
+
+#### 1.2.1. Boxplots of all numeric variables
+
+```{r, echo=FALSE}
+medv_bp <- ggplot(bostn, aes(y = medv))+
+  geom_boxplot()+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+crim_bp <- ggplot(bostn, aes(y = crim))+
+  geom_boxplot()+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+zn_bp <- ggplot(bostn, aes(y = zn))+
+  geom_boxplot()+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+indus_bp <- ggplot(bostn, aes(y = indus))+
+  geom_boxplot()+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+nox_bp <- ggplot(bostn, aes(y = nox))+
+  geom_boxplot()+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+rm_bp <- ggplot(bostn, aes(y = rm))+
+  geom_boxplot()+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+age_bp <- ggplot(bostn, aes(y = age))+
+  geom_boxplot()+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+dis_bp <- ggplot(bostn, aes(y = dis))+
+  geom_boxplot()+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+tax_bp <- ggplot(bostn, aes(y = tax))+
+  geom_boxplot()+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+pt_bp <- ggplot(bostn, aes(y = ptratio))+
+  geom_boxplot()+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+black_bp <- ggplot(bostn, aes(y = black))+
+  geom_boxplot()+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+workers_bp <- ggplot(bostn, aes(y = lstat))+
+  geom_boxplot()+
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+box_plots1 <- plot_grid(medv_bp, crim_bp, zn_bp, indus_bp, nox_bp, rm_bp, nrow = 1, labels = "AUTO")
+box_plots2 <- plot_grid(age_bp, dis_bp, tax_bp, pt_bp, black_bp, workers_bp, nrow = 1, labels = "AUTO")
+bp_title1 <- ggdraw() +
+  draw_label("The variations of numeric variables. Part 1.", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+bp_title2 <- ggdraw() +
+  draw_label("The variations of numeric variables. Part 2.", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+bp_caption1 <- ggdraw() +
+  draw_text("Figure 2. Box plots of the distributions of following variables: value of houses (A); crime rate (B), proportion of large\nland lots (C), proportion of business acres (D), nitric oxides concentration (E), number of rooms (F).", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+bp_caption2 <- ggdraw() +
+  draw_text("Figure 3. Box plots of the distributions of following variables: proportion of old houses (A); distances to employment\ncentres (B), property tax rate (C), pupil-teacher ratio (D), proportion of black (E), proportion of workers (F).", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+plot_grid(bp_title1, box_plots1, bp_caption1, ncol = 1, rel_heights = c(0.1, 1, 0.1))
+plot_grid(bp_title2, box_plots2, bp_caption2, ncol = 1, rel_heights = c(0.1, 1, 0.1))
+```
+
+
+
+With scaled values
+
+```{r}
+bostn_wo_factors <- bostn %>% select(-chas, -rad)
+factors <- bostn %>% select(chas, rad)
+bostn_scaled_wo_factors <- as.data.frame(apply(bostn_wo_factors, 2, scale))
+bostn_scaled <- cbind(bostn_scaled_wo_factors, factors)
+bostn_long <- bostn_scaled %>% gather()
+bostn_long$value <- as.numeric(bostn_long$value)
+ggplot(bostn_long, aes(x = key, y = value))+
+  geom_boxplot()+
+  ylab("Scaled values of variable")+
+  xlab("Variable")+
+  labs(title = "The variations of scaled numeric variables",
+              caption = "Figure 4. Box plots of the distributions of scaled numeric variables")+
+  theme(plot.caption = element_text(hjust = 0))
+```
+
+There are no cut-off outliers, that could indicate observation record errors (like accident multiplication by 10), all variables are distributed as gradients. Let's check 3 highest observations of crime variable to be sure.
+
+```{r}
+bostn %>% slice_max(crim, n = 3)
+```
+
+They look realistic: old houses (**age** > 90), far from city centers (**dis** < 2), few schools (high **ptratio**), cheap houses (**medv** < 11).
+
+#### 1.2.2. Cleveland dot plots of all numeric variables
+
+
+```{r, echo=FALSE}
+medv_cdp <- ggplot(bostn, aes(y = 1:nrow(bostn), x = medv, colour = rad))+
+  geom_point()+
+  ylab("Index of value")+
+  scale_colour_manual(values=c('deepskyblue', 'darkgoldenrod1'))
+crim_cdp <- ggplot(bostn, aes(y = 1:nrow(bostn), x = crim, colour = rad))+
+  geom_point()+
+  ylab("Index of value")+
+  scale_colour_manual(values=c('deepskyblue', 'darkgoldenrod1'))
+zn_cdp <- ggplot(bostn, aes(y = 1:nrow(bostn), x = zn, colour = rad))+
+  geom_point()+
+  ylab("Index of value")+
+  scale_colour_manual(values=c('deepskyblue', 'darkgoldenrod1'))
+indus_cdp <- ggplot(bostn, aes(y = 1:nrow(bostn), x = indus, colour = rad))+
+  geom_point()+
+  ylab("Index of value")+
+  scale_colour_manual(values=c('deepskyblue', 'darkgoldenrod1'))
+nox_cdp <- ggplot(bostn, aes(y = 1:nrow(bostn), x = nox, colour = rad))+
+  geom_point()+
+  ylab("Index of value")+
+  scale_colour_manual(values=c('deepskyblue', 'darkgoldenrod1'))
+rm_cdp <- ggplot(bostn, aes(y = 1:nrow(bostn), x = rm, colour = rad))+
+  geom_point()+
+  ylab("Index of value")+
+  scale_colour_manual(values=c('deepskyblue', 'darkgoldenrod1'))
+age_cdp <- ggplot(bostn, aes(y = 1:nrow(bostn), x = age, colour = rad))+
+  geom_point()+
+  ylab("Index of value")+
+  scale_colour_manual(values=c('deepskyblue', 'darkgoldenrod1'))
+dis_cdp <- ggplot(bostn, aes(y = 1:nrow(bostn), x = dis, colour = rad))+
+  geom_point()+
+  ylab("Index of value")+
+  scale_colour_manual(values=c('deepskyblue', 'darkgoldenrod1'))
+tax_cdp <- ggplot(bostn, aes(y = 1:nrow(bostn), x = tax, colour = rad))+
+  geom_point()+
+  ylab("Index of value")+
+  scale_colour_manual(values=c('deepskyblue', 'darkgoldenrod1'))
+pt_cdp <- ggplot(bostn, aes(y = 1:nrow(bostn), x = ptratio, colour = rad))+
+  geom_point()+
+  ylab("Index of value")+
+  scale_colour_manual(values=c('deepskyblue', 'darkgoldenrod1'))
+black_cdp <- ggplot(bostn, aes(y = 1:nrow(bostn), x = black, colour = rad))+
+  geom_point()+
+  ylab("Index of value")+
+  scale_colour_manual(values=c('deepskyblue', 'darkgoldenrod1'))
+workers_cdp <- ggplot(bostn, aes(y = 1:nrow(bostn), x = lstat, colour = rad))+
+  geom_point()+
+  ylab("Index of value")+
+  scale_colour_manual(values=c('deepskyblue', 'darkgoldenrod1'))
+cd_plots1 <- plot_grid(medv_cdp, crim_cdp, zn_cdp, indus_cdp, nox_cdp, rm_cdp, nrow = 2, labels = "AUTO")
+cd_plots2 <- plot_grid(age_cdp, dis_cdp, tax_cdp, pt_cdp, black_cdp, workers_cdp, nrow = 2, labels = "AUTO")
+cd_title1 <- ggdraw() +
+  draw_label("Cleveland Dot Plots. Part 1.", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+cd_title2 <- ggdraw() +
+  draw_label("Cleveland Dot Plots. Part 2.", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+cd_caption1 <- ggdraw() +
+  draw_text("Figure 5. Cleveland Dot Plots of following variables: value of houses (A); crime rate (B), proportion of large\nland lots (C), proportion of business acres (D), nitric oxides concentration (E), number of rooms (F).", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+cd_caption2 <- ggdraw() +
+  draw_text("Figure 6. Cleveland Dot Plots of following variables: proportion of old houses (A); distances to employment\ncentres (B), property tax rate (C), pupil-teacher ratio (D), proportion of black (E), proportion of workers (F).", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+plot_grid(cd_title1, cd_plots1, cd_caption1, ncol = 1, rel_heights = c(0.1, 1, 0.1))
+plot_grid(cd_title2, cd_plots2, cd_caption2, ncol = 1, rel_heights = c(0.1, 1, 0.1))
+```
+
+There is a possibility that group of observations with **rad** = 24 (now second level) was sampled in different time period than all other observation. The group is distinct on every plot (Fig. 5,6): for some variables the distribution differs significantly(**black**, **crim**, **medv**, **nox**), for others all observations are the same (**indus**, **tax**, **ptratio**). These features can be the cause of autocorrelation. It might be worth divide the original dataset in two based on **rad** factor and analyze them separately.
+
+#### 1.2.3. Factor variables
+
+```{r, echo=FALSE}
+rad_bp <- ggplot(bostn, aes(rad, medv))+
+  geom_boxplot(aes(group = rad))
+chas_bp <- ggplot(bostn, aes(chas, medv))+
+  geom_boxplot(aes(group = chas))
+factor_bp <- plot_grid(rad_bp, chas_bp, labels = "AUTO")
+
+factor_bp_title <- ggdraw() +
+  draw_label("Box plot of medv distribution by factors", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+factor_bp_caption <- ggdraw() +
+  draw_text("Figure 7. Box plot of houses' value distribution by index of accessibility to radial highways (A) and\nCharles River dummy variable (B) factors.", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+plot_grid(factor_bp_title, factor_bp, factor_bp_caption, ncol = 1, rel_heights = c(0.1, 1, 0.1))
+
+```
+
+As it was noticeable on Fig. 5A, houses' value in suspicious group (**rad** 24) is rather low, while chas groups look plausible (the proximity to the river should increase the attractiveness of the area). 
+
+#### 1.2.4. The nature of the relationship between houses' value variable and all variables
+
+
+```{r, echo=FALSE}
+gg_cor <- ggplot(bostn, aes(y = medv))+
+  geom_point()+
+  geom_smooth(se = FALSE)
+crim_nor <- gg_cor + aes(x = crim)
+zn_nor <- gg_cor + aes(x = zn)
+indus_nor <- gg_cor + aes(x = indus)
+nox_nor <- gg_cor + aes(x = nox)
+rm_nor <- gg_cor + aes(x = rm)
+age_nor <- gg_cor + aes(x = age)
+dis_nor <- gg_cor + aes(x = dis)
+tax_nor <- gg_cor + aes(x = tax)
+pt_nor <- gg_cor + aes(x = ptratio)
+black_nor <- gg_cor + aes(x = black)
+workers_nor <- gg_cor + aes(x = lstat)
+nor_plots1 <- plot_grid(crim_nor, zn_nor, indus_nor, nox_nor, rm_nor, age_nor, nrow = 2, labels = "AUTO")
+nor_plots2 <- plot_grid(dis_nor, tax_nor, pt_nor, black_nor, workers_nor, nrow = 2, labels = "AUTO")
+nor_title1 <- ggdraw() +
+  draw_label("Basic Line Plots of medv. Part 1.", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+nor_title2 <- ggdraw() +
+  draw_label("Basic Line Plots of medv. Part 2.", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+nor_caption1 <- ggdraw() +
+  draw_text("Figure 8. Basic Line Plots of houses' value varsus following variables: crime rate (A); proportion of large land lots (B),\n proportion of business acres (C), nitric oxides concentration (D), number of rooms (E), proportion of old houses (F).", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+nor_caption2 <- ggdraw() +
+  draw_text("Figure 9. Basic Line Plots of houses' value varsus following variables: distances to employment centres (A); property\ntax rate (B), pupil-teacherratio (C), proportion of black (D), proportion of workers (E).", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+plot_grid(nor_title1, nor_plots1, nor_caption1, ncol = 1, rel_heights = c(0.1, 1, 0.1))
+plot_grid(nor_title2, nor_plots2, nor_caption2, ncol = 1, rel_heights = c(0.1, 1, 0.1))
+```
+
+Unfortunately, there is clearly nonlinear relationship: **medv** ~ **lstat**. THe rest look acceptable.  
+
+Finallym let's take a look at future predicted variable distribution.
+```{r}
+ggplot(bostn, aes(x = medv))+
+  geom_histogram(color = "black", bins = 40)+
+  labs(title = "Distribution of medv",
+              caption = "Figure 10. Distribution of houses' value variable.")+
+  theme(plot.caption = element_text(hjust = 0))
+```
+
+The distribution differs from normal. However, the normal distribution of predicted variable is not a strict condition for multiple regression, and the distribution is close enough to normal.
+
+
+## 2. Multiple linear model
+
+### 2.1. Full model
+
+Let's build the first model, a full one with all possible predictors (without interaction).
+
+```{r}
+model_1 <- lm(medv ~ ., bostn)
+summary(model_1)
+```
+
+Full model evaluation:<br/>
+Adjusted R-squared:  0.7306<br/>
+F~13,492~: 106.4<br/>
+p-value: < 2.2e-16<br/>
+
+The results of statistical tests look good. However there are two insignificant variables (**indus**, **age**). Furthermore, before using the model for prediction, it is necessary to check the feasibility of all the requirements of such models.
+
+### 2.2. Scaled full model
+
+To assess the most influential predictors, standardization is required.
+
+```{r}
+model_scale <- lm(medv ~ ., bostn_scaled)
+summary(model_scale)
+```
+
+The most influential predictors in full scaled model are **lstat** (coefficient - -0.406862, t value - -10.271, p value - < 2e-16) and **rad** (coefficient - 0.553340, t value - 3.907, p value - < 0.000107). Overall variables can be presented in order of influence like this:
+
+```{r}
+sort(abs(round(model_scale$coefficients, 3)), decreasing = TRUE)
+
+```
+
+
+
+
+## 3. Diagnostics of full model
+
+### 3.1. Multicollinearity
+
+To assess multicollinearity of numeric predictors we will use Variance inflation factor (VIF). 
+
+```{r}
+mod_for_vif <- lm(medv ~ ., bostn_wo_factors)
+summary(mod_for_vif)
+round(vif(mod_for_vif), 1)
+```
+
+There is significant collinearity in full model (VIF for **nox**, **dis**, **indus**, **tax**, **age** are greater than 3).
+
+
+### 3.2. Linearity of relationship and constancy of variance
+
+```{r}
+mod_diag <- data.frame(fortify(model_1))
+
+gg_residues_1 <- ggplot(data = mod_diag, aes(x = .fitted, y = .stdresid)) + 
+  geom_point() + 
+  geom_hline(yintercept = 0) +
+  geom_smooth(method = "lm") +
+  geom_hline(yintercept = 2, color = "red") +
+  geom_hline(yintercept = -2, color = "red")
+gg_residues_1 +
+  ylab("Standardised residuals")+
+  xlab('Fitted values of model')+
+  labs(title = "Residual plot of full model",
+              caption = "Figure 11. Residual plot of full model with threshold of +/-2 sygma.")+
+  theme(plot.caption = element_text(hjust = 0))
+```
+
+There is no wedge-shaped heteroscedasticity, however there's a clear arc-shaped pattern in residues' plot and several outliers (which are beyond 3 sygma threshold, 3 even beyond 4 sygma threshold).
+The arc-shaped pattern indicates dependence of observations, possibly autocorrelation.
+
+Let's take a closer look at residue of separate predictors.
+
+```{r, echo=FALSE}
+resi_1 <- gg_residues_1 + aes(x = bostn$crim)+
+  ylab("st. residuals")+
+  xlab('crim')
+resi_2 <- gg_residues_1 + aes(x = bostn$zn)+
+  ylab("st. residuals")+
+  xlab('zn')
+resi_3 <- gg_residues_1 + aes(x = bostn$indus)+
+  ylab("st. residuals")+
+  xlab('indus')
+resi_4 <- gg_residues_1 + aes(x = bostn$nox)+
+  ylab("st. residuals")+
+  xlab('nox')
+resi_5 <- gg_residues_1 + aes(x = bostn$rm)+
+  ylab("st. residuals")+
+  xlab('rm')
+resi_6 <- gg_residues_1 + aes(x = bostn$age)+
+  ylab("st. residuals")+
+  xlab('age')
+resi_7 <- gg_residues_1 + aes(x = bostn$dis)+
+  ylab("st. residuals")+
+  xlab('dis')
+resi_8 <- gg_residues_1 + aes(x = bostn$tax)+
+  ylab("st. residuals")+
+  xlab('tax')
+resi_9 <- gg_residues_1 + aes(x = bostn$ptratio)+
+  ylab("st. residuals")+
+  xlab('ptratio')
+resi_10 <- gg_residues_1 + aes(x = bostn$black)+
+  ylab("st. residuals")+
+  xlab('black')
+resi_11 <- gg_residues_1 + aes(x = bostn$lstat)+
+  ylab("st. residuals")+
+  xlab('lstat')
+
+resi_plots1 <- plot_grid(resi_1, resi_2, resi_3, resi_4, resi_5, resi_6, nrow = 2, labels = "AUTO", label_size = 12)
+resi_plots2 <- plot_grid(resi_7, resi_8, resi_9, resi_10, resi_11, gg_residues_1, nrow = 2, labels = "AUTO", label_size = 12)
+
+resi_plots_title1 <- ggdraw() +
+  draw_label("Residual plot of full model by predictors. Part 1.", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+resi_plots_title2 <- ggdraw() +
+  draw_label("Residual plot of full model by predictors. Part 2.", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+resi_plots_caption1 <- ggdraw() +
+  draw_text("Figure 12. Residual plot of full model by following predictors: crime rate (A); proportion of large land lots (B), proportion\nof business acres (C), nitric oxides concentration (D), number of rooms (E), proportion of old houses (F).", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+resi_plots_caption2 <- ggdraw() +
+  draw_text("Figure 13. Residual plot of full model by following predictors: distances to employment centres (A); property\ntax rate (B),pupil-teacher ratio (C), proportion of black (D), proportion of workers (E), figure 11 (F).", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+plot_grid(resi_plots_title1, resi_plots1, resi_plots_caption1, ncol = 1, rel_heights = c(0.1, 1, 0.1))
+plot_grid(resi_plots_title2, resi_plots2, resi_plots_caption2, ncol = 1, rel_heights = c(0.1, 1, 0.1))
+```
+
+**rm** variable has the same arc-shaped pattern, something close is also in **lstat** variable plot. Unfortunately, the same variables are highly influential according to section 2.2. This could indicate that the required dependence of **medv** variable is nonlinear. Or the possible reason of pattern is several outliers in rm variable, that correspond to abnormally expensive houses (Fig. 5E).
+
+### 3.3. Residue outliers
+```{r}
+resi_outliers_high <-  mod_diag %>% slice_max(.stdresid, n = 6)
+resi_outliers_low <-  mod_diag %>% slice_min(.stdresid, n = 1)
+resi_outliers <- rbind(resi_outliers_high, resi_outliers_low)
+resi_outliers[,c(1:14, 20)]
+```
+
+The contributor of these outliers is the suspicious group with **rad** 24.
+
+### 3.4. Influential observations
+
+```{r}
+ggplot(mod_diag, aes(x = 1:nrow(mod_diag), y = .cooksd)) + 
+  geom_bar(stat = "identity") + 
+  geom_hline(yintercept = 1, color = "red")+
+  ylab("Cooks distance")+
+  xlab('Index of observation')+
+  labs(title = "Cook’s D Bar Plot",
+              caption = "Figure 14. Bar Plot of Cook’s distance with threshold of 1.")+
+  theme(plot.caption = element_text(hjust = 0))
+```
+
+There are no observations that strongly influence fitted values of the model.
+
+
+### 3.5. Normality of residue distribution
+
+```{r}
+invisible(qqPlot(mod_diag$.stdresid, ylab=paste("Studentized Residuals"),
+    xlab=paste("Theorethical Quantiles"), main = 'Quantile-Comparison Plot of full model'))
+```
+
+```{r, echo=FALSE}
+ggdraw() +
+  draw_text("Figure 15. Plot of empirical quantiles of studentized residuals from a full model, againsttheoretical quantiles of\na comparison distribution.", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+```
+
+
+
+The residuals are not normally distributed.
+
+
+### 3.6. Visualization of full model
+
+First, let's visualize the initial data. As a main predictor for visualization (for x axis) we will use lstat as the most significant numeric predictor (according to model_scale).
+
+```{r}
+pred <- ggplot(bostn, aes(lstat, medv)) + 
+  geom_point(aes(colour = rad, size = chas)) + 
+  geom_point(aes(size = chas), shape = 1, colour = "gray50")+
+  scale_size_manual(values=c(2, 7))+
+  scale_colour_manual(values=c('deepskyblue', 'darkgoldenrod1'))+
+  labs(title = "Relationship medv ~ lstat",
+              caption = "Figure 16. Relationship between houses' value and proportion of workers with rad ditribituon indicated by colour and chas\ndistribution indicated by size.")+
+  theme(plot.caption = element_text(hjust = 0))
+pred
+```
+
+
+
+```{r, echo=FALSE}
+model_1_predicts <- bostn %>% group_by(rad, chas) %>% do(data.frame(
+  lstat = seq(min(bostn$lstat), max(bostn$lstat), length.out = 50),
+  crim = mean(bostn$crim),
+  zn = mean(bostn$zn),
+  indus = mean(bostn$indus),
+  nox = mean(bostn$nox),
+  rm = mean(bostn$rm),
+  age = mean(bostn$age),
+  dis = mean(bostn$dis),
+  tax = mean(bostn$tax),
+  ptratio = mean(bostn$ptratio),
+  black = mean(bostn$black)))
+
+predictions_1 <- predict(model_1, newdata = model_1_predicts,  interval = 'confidence')
+model_1_predicts <- data.frame(model_1_predicts, predictions_1)
+
+model_1_predicts_00 <- model_1_predicts %>% filter(rad == 0, chas == 0)
+model_1_predicts_01 <- model_1_predicts %>% filter(rad == 0, chas == 1)
+model_1_predicts_10 <- model_1_predicts %>% filter(rad == 1, chas == 0)
+model_1_predicts_11 <- model_1_predicts %>% filter(rad == 1, chas == 1)
+
+ggplot(bostn, aes(lstat, medv)) + 
+  geom_point(aes(colour = rad, size = chas)) + 
+  geom_point(aes(size = chas), shape = 1, colour = "gray50")+
+  scale_size_manual(values=c(2, 7))+
+  scale_colour_manual(values=c('deepskyblue', 'darkgoldenrod1'))+
+  geom_line(data = model_1_predicts_00, aes(x = lstat, y = fit))+
+  geom_ribbon(data = model_1_predicts_00, aes(x = lstat, y = fit, ymin = lwr, ymax = upr), alpha = 0.1)+
+  labs(title = "Prediction of full model (rad = 0, chas = 0)",
+              caption = "Figure 17. Relationship between houses' value and proportion of workers with full model prediction line (rad set to 0,\nchas set to 0).")+
+  theme(plot.caption = element_text(hjust = 0))
+
+ggplot(bostn, aes(lstat, medv)) + 
+  geom_point(aes(colour = rad, size = chas))+
+  geom_point(aes(size = chas), shape = 1, colour = "gray50")+
+  scale_size_manual(values=c(2, 7))+
+  scale_colour_manual(values=c('darkgoldenrod1', 'deepskyblue'))+
+  geom_line(data = model_1_predicts_01, aes(x = lstat, y = fit))+
+  geom_ribbon(data = model_1_predicts_01, aes(x = lstat, y = fit, ymin = lwr, ymax = upr), alpha = 0.1)+
+  labs(title = "Prediction of full model (rad = 0, chas = 1)",
+              caption = "Figure 18. Relationship between houses' value and proportion of workers with full model prediction line (rad set to 0,\nchas set to 1).")+
+  theme(plot.caption = element_text(hjust = 0))
+
+ggplot(bostn, aes(lstat, medv)) + 
+  geom_point(aes(colour = rad, size = chas))+
+  geom_point(aes(size = chas), shape = 1, colour = "gray50")+
+  scale_size_manual(values=c(2, 7))+
+  scale_colour_manual(values=c('darkgoldenrod1', 'deepskyblue'))+
+  geom_line(data = model_1_predicts_10, aes(x = lstat, y = fit))+
+  geom_ribbon(data = model_1_predicts_10, aes(x = lstat, y = fit, ymin = lwr, ymax = upr), alpha = 0.1)+
+  labs(title = "Prediction of full model (rad = 1, chas = 0)",
+              caption = "Figure 19. Relationship between houses' value and proportion of workers with full model prediction line (rad set to 1,\nchas set to 0).")+
+  theme(plot.caption = element_text(hjust = 0))
+
+ggplot(bostn, aes(lstat, medv)) + 
+  geom_point(aes(colour = rad, size = chas))+
+  geom_point(aes(size = chas), shape = 1, colour = "gray50")+
+  scale_size_manual(values=c(2, 7))+
+  scale_colour_manual(values=c('darkgoldenrod1', 'deepskyblue'))+
+  geom_line(data = model_1_predicts_11, aes(x = lstat, y = fit))+
+  geom_ribbon(data = model_1_predicts_11, aes(x = lstat, y = fit, ymin = lwr, ymax = upr), alpha = 0.1)+
+  labs(title = "Prediction of full model (rad = 1, chas = 1)",
+              caption = "Figure 20. Relationship between houses' value and proportion of workers with full model prediction line (rad set to 1,\nchas set to 1).")+
+  theme(plot.caption = element_text(hjust = 0))
+```
+
+
+### 3.7. Full model diagnostic output
+
+Full model without interactions is not suited for houses' value prediction as it does not meet several requirement for multiple regression, such as:<br/>
+* Linear relationship.<br/>
+* Multivariate normality.<br/>
+* No or little multicollinearity.<br/>
+* No auto-correlation.<br/>
+
+Further optimization is needed.
+
