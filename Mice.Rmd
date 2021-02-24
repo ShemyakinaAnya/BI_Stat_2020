@@ -1,0 +1,417 @@
+---
+title: "Mice Protein Expression"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+```
+
+Libraries required for report's functioning
+```{r}
+library(readxl)
+library(ggplot2)
+library(cowplot)
+library(car)
+library(Hmisc)
+library(dplyr)
+library(stringr)
+library(vegan)
+library(plot3D)
+library(corrplot)
+library(factoextra)
+```
+
+*Versions of R and packages used:*<br/>
+R version 3.6.3<br/>
+dplyr_1.0.4<br/>
+Hmisc_4.4-2<br/>
+car_3.0-10<br/>
+cowplot_1.1.1<br/>
+ggplot2_3.3.3<br/>
+readxl_1.3.1<br/>
+stringr_1.4.0<br/>
+vegan_2.5-7<br/>
+factoextra_1.0.7<br/>
+plot3D_1.3<br/>
+corrplot_0.84<br/>
+
+
+## Introduction
+
+This report is about statistical analysis of protein expression data in the Ts65Dn mouse model of Down Syndrome, influenced by learning behavior and memantine. The data set consists of the expression levels of 77 proteins. There are 38 control mice and 34 trisomic mice (Down syndrome), for a total of 72 mice. In the experiments, 15 measurements were registered of each protein per sample/mouse. Therefore, for control mice, there are 38x15, or 570 measurements, and for trisomic mice, there are 34x15, or 510 measurements. The dataset contains a total of 1080 measurements per protein. Each measurement can be considered as an independent sample/mouse. 
+
+The eight classes of mice are described based on features such as genotype, behavior and treatment. According to genotype, mice can be control or trisomic. According to behavior, some mice have been stimulated to learn (context-shock) and others have not (shock-context) and in order to assess the effect of the drug memantine in recovering the ability to learn in trisomic mice, some mice have been injected with the drug and others have not.
+
+Classes:
+c-CS-s: control mice, stimulated to learn, injected with saline (9 mice)<br/>
+c-CS-m: control mice, stimulated to learn, injected with memantine (10 mice)<br/>
+c-SC-s: control mice, not stimulated to learn, injected with saline (9 mice)<br/>
+c-SC-m: control mice, not stimulated to learn, injected with memantine (10 mice)<br/>
+t-CS-s: trisomy mice, stimulated to learn, injected with saline (7 mice)<br/>
+t-CS-m: trisomy mice, stimulated to learn, injected with memantine (9 mice)<br/>
+t-SC-s: trisomy mice, not stimulated to learn, injected with saline (9 mice)<br/>
+t-SC-m: trisomy mice, not stimulated to learn, injected with memantine (9 mice)<br/>
+
+Data and description source: https://archive.ics.uci.edu/ml/datasets/Mice+Protein+Expression#
+
+## 1. Data processing
+
+### 1.1. Data gathering
+
+```{r}
+mice_data <- read_excel('Data_Cortex_Nuclear.xls', col_names = TRUE)
+str(mice_data)
+```
+
+### 1.2. Correction of variables format
+
+Four last variables (Genotype, Treatment, Behavior and class) should be set as factorial:
+
+```{r}
+mice_data$Genotype <- factor(mice_data$Genotype)
+mice_data$Treatment <- factor(mice_data$Treatment)
+mice_data$Behavior <- factor(mice_data$Behavior)
+mice_data$class <- factor(mice_data$class)
+```
+
+### 1.3. Experiment details according to data
+
+#### Number of mices:
+
+ID of a mouse in exact measurement consists of ID of mouse itself and one-two digits, corresponding to the measurement. To assess the number of unique mice in experiment, let's get rid of measurement ID in MouseID.
+
+```{r}
+mice_data$MouseID <- str_replace_all(mice_data$MouseID, "_[:digit:]+", "")
+length(unique(mice_data$MouseID))
+```
+#### Number of groups:
+
+```{r}
+unique(mice_data[, c(79:82)])
+```
+
+There are 8 classes of observation, formed by three two-level factors: Genotype, Treatment, and Behavior.
+
+### 1.4. Missing values
+
+Data set contains missing values:
+
+```{r}
+too_much_NA_prot <- colSums(is.na(mice_data))
+too_much_NA_prot
+```
+
+Proteins H3AcK18_N, EGR1_N, H3MeK4_N, BAD_N, BCL2_N and pCFOS_N are especially lacking:
+
+```{r}
+top_n(as.data.frame(too_much_NA_prot), 6)
+```
+
+Let's use data set with corresponding variables omitted for further analysis.
+
+```{r}
+mice_data_complete <- mice_data %>% select(-H3AcK18_N, -EGR1_N, -H3MeK4_N, -BAD_N, -BCL2_N, -pCFOS_N)
+```
+
+Remaining missing values in protein variables require removing corresponding observations as it is of low probability to predict correctly enough protein expression depending on discrete variables.
+
+```{r}
+mice_data_complete <- mice_data_complete[complete.cases(mice_data_complete),]
+mice_data_complete %>% summarise(Count_in_complete_dataset = n())
+```
+
+Thus, 6 proteins and 33 observations were omitted in mice_data_complete data set.
+
+### 1.5. Class balance
+
+The balance of eight given groups of observations (class variable) did not change much due to the previous step:
+
+
+```{r, echo=FALSE}
+counts_prev <- ggplot(mice_data, aes(class)) +
+  geom_bar(fill = "gray80") +
+  coord_flip() +
+  theme_bw()
+counts_new <- ggplot(mice_data_complete, aes(class)) +
+  geom_bar(fill = "gray80") +
+  coord_flip() +
+  theme_bw()
+bar_plots1 <- plot_grid(counts_prev, counts_new, nrow = 1, labels = "AUTO")
+br1_title <- ggdraw() +
+  draw_label("Class balance with and without NA", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+br1_caption <- ggdraw() +
+  draw_text("Figure 1. Number of observations by class variable in original dataset (A) and dataset with NA omitted (B).", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+plot_grid(br1_title, bar_plots1, br1_caption, ncol = 1, rel_heights = c(0.1, 1, 0.1))
+
+```
+
+
+Overall the data are moderately unbalanced.
+
+Let's take a look at the balances of factorial groups in new data set:
+
+
+```{r, echo=FALSE}
+gr1 <- ggplot(mice_data_complete, aes(Genotype)) +
+  geom_bar(fill = "gray80") + 
+  theme_bw()
+gr2 <- ggplot(mice_data_complete, aes(Treatment)) +
+  geom_bar(fill = "gray80") + 
+  theme_bw()
+gr3 <- ggplot(mice_data_complete, aes(Behavior)) +
+  geom_bar(fill = "gray80") + 
+  theme_bw()
+bar_plots2 <- plot_grid(gr1, gr2, gr3, nrow = 1, labels = "AUTO")
+br2_title <- ggdraw() +
+  draw_label("Class balance in factor-based groups", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+br2_caption <- ggdraw() +
+  draw_text("Figure 2. Number of observations grouped by factor variables: Genotype (A) Treatment (B) and Behavior(C).", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+plot_grid(br2_title, bar_plots2, br2_caption, ncol = 1, rel_heights = c(0.1, 1, 0.1))
+```
+
+
+## 2. Are there differences in the level of BDNF_N production depending on the class
+
+One-way Anova will be used to determine whether BDNF_N protein expression differs significantly depending on class variable.
+
+### 2.1. Outliers
+
+Visual representation of BDNF_N variability in different classes:
+
+```{r, echo=FALSE}
+ggplot(mice_data_complete, aes(y = BDNF_N, x = class))+
+  geom_boxplot() + 
+  labs(title = "Distribution of BDNF_N by class",
+  caption = "Figure 3. Boxplots of BDNF_N production in different classes.")+
+  theme_bw()+
+  theme(plot.caption = element_text(hjust = 0))
+```
+
+Let's remove several significant outliers:
+
+```{r}
+Q <- quantile(mice_data_complete$BDNF_N, probs=c(.25, .75), na.rm = FALSE)
+iqr <- IQR(mice_data_complete$BDNF_N)
+mice_data_complete_wo_outliers <- subset(mice_data_complete, mice_data_complete$BDNF_N > (Q[1] - 1.5*iqr) & mice_data_complete$BDNF_N < (Q[2]+1.5*iqr))
+```
+
+```{r, echo=FALSE}
+ggplot(mice_data_complete_wo_outliers, aes(y = BDNF_N, x = class))+
+  geom_boxplot() + 
+  labs(title = "Distribution of BDNF_N by class without outliers",
+  caption = "Figure 4. Boxplots of BDNF_N production in different classes with significant outliears removed.")+
+  theme_bw()+
+  theme(plot.caption = element_text(hjust = 0))
+```
+
+
+### 2.2. Applicability of one-way Anova
+
+
+```{r, echo=FALSE}
+ggplot(mice_data_complete_wo_outliers, aes(BDNF_N, fill = class)) +
+  geom_histogram(binwidth = 0.003)+
+  scale_fill_brewer(type = "qual", palette = 3) + 
+  labs(title = "Type of BDNF_N distribution by class",
+  caption = "Figure 5. Histogram of BDNF_N production in different classes to assess disdtibution type.")+
+  theme_bw()+
+  theme(plot.caption = element_text(hjust = 0))
+```
+
+
+
+```{r}
+shapiro.test(subset(mice_data_complete_wo_outliers, class == "c-CS-m")$BDNF_N)
+shapiro.test(subset(mice_data_complete_wo_outliers, class == "c-CS-s")$BDNF_N)
+shapiro.test(subset(mice_data_complete_wo_outliers, class == "c-SC-m")$BDNF_N)
+shapiro.test(subset(mice_data_complete_wo_outliers, class == "c-SC-s")$BDNF_N)
+shapiro.test(subset(mice_data_complete_wo_outliers, class == "t-CS-m")$BDNF_N)
+shapiro.test(subset(mice_data_complete_wo_outliers, class == "t-CS-s")$BDNF_N)
+shapiro.test(subset(mice_data_complete_wo_outliers, class == "t-SC-m")$BDNF_N)
+shapiro.test(subset(mice_data_complete_wo_outliers, class == "t-SC-s")$BDNF_N)
+```
+
+BDNF_N is not distributed normally in all classes (non normally at least in 3 classes) according to Shapiro-Wilk Normality Test.
+Still, distributions on Figure 5 demonstrate close to normal type.
+
+Diagnostics of linear model required for Anova:
+
+```{r}
+lin_model <- lm(BDNF_N ~ class, data = mice_data_complete_wo_outliers)
+
+model_graph <- data.frame(fortify(lin_model))
+
+ggplot(model_graph, aes(x = 1:nrow(model_graph), y = .cooksd)) + 
+  geom_bar(stat = "identity") + 
+  ylab("Cooks distance")+
+  xlab('Index of observation')+
+  theme_bw() +
+  labs(title = "Cook’s D Bar Plot", caption = "Figure 6. Bar Plot of Cook’s distance.") +
+  theme(plot.caption = element_text(hjust = 0))
+
+
+ggplot(model_graph, aes(x = class, y = .stdresid))+
+  geom_boxplot() +
+  ylab("Standardised residuals")+
+  theme_bw() +
+  labs(title = "Residual plot", caption = "Figure 7. Bar Plots of Residue by class.") +
+  theme(plot.caption = element_text(hjust = 0))
+
+invisible(qqPlot(model_graph$.stdresid, ylab=paste("Studentized Residuals"),
+    xlab=paste("Theorethical Quantiles"), main = 'Quantile-Comparison Plot of full model'))
+```
+
+```{r, echo=FALSE, fig.height = 0.4, fig.width = 10}
+ggdraw() +
+  draw_text("Figure 8. Plot of empirical quantiles of studentized residuals from a linear model, against theoretical quantiles of\na comparison distribution.", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+```
+
+
+Moderately violated assumptions of one-way Anova are:<br/>
+- normality of samples' distributions by group<br/>
+- sample independence (there are technical replicates)<br/>
+- homoscedasticity (as groups are not well balanced, outliers in Residues may prove problematic)<br/>
+
+Thus, the result of the analysis should be treated with an appropriate degree of caution.
+
+### 2.3. Anova
+
+```{r}
+summary(aov(lin_model))
+```
+
+BDNF_N expression differs significantly depending on class; F(7, 1015) = 16.47, p-value = 2.2e-16.
+
+
+## 3. PCA
+
+```{r}
+cor_matrix <- cor(mice_data_complete[, c(2:72)])
+```
+
+```{r, echo=FALSE, fig.height = 0.3, fig.width = 10}
+ggdraw() +
+  draw_label("Data set correlation matrix", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+```
+
+```{r, echo=FALSE}
+corrplot(cor_matrix, method = "color", type = "upper", tl.col = "black", tl.cex = .4)
+```
+
+```{r, echo=FALSE, fig.height = 0.3, fig.width = 10}
+ggdraw() +
+  draw_text("Figure 9. Graphical display of a correlation matrix of all numeric variables.", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+```
+
+
+Linear relationships between variables are present, as at least a half of corrplot is rather blue
+
+```{r}
+mice_pca <- rda(mice_data_complete[, c(2:72)], scale = T)
+```
+
+Among resulting 70 Principal Components (PCA) (the same number as the number of original protein variables), less than 10 PC explain the most variance
+```{r}
+screeplot(mice_pca, type = "lines", bstick = TRUE, main = "Scree plot")
+```
+
+```{r, echo=FALSE, fig.height = 0.4, fig.width = 10}
+ggdraw() +
+  draw_text("Figure 10. Scree plot of eigenvalues.", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+```
+
+
+We only need four first PC (the "elbow" starts from the 5th PC).
+
+
+```{r}
+eig <- eigenvals(mice_pca)
+explained <- sum(eig[1:4])/sum(eig) * 100
+```
+
+Together they explain `r round(explained, 1)` % of variance, each:
+```{r}
+pca_summary <- summary(mice_pca)
+pca_result <- as.data.frame(pca_summary$cont)
+plot_data <- as.data.frame(t(pca_result[c("Proportion Explained"),]))
+plot_data$component <- lapply(pca_summary$cont, attributes)$importance$dimnames[[2]]
+
+ggplot(plot_data[c(1:4),], aes(component, `Proportion Explained`)) +
+  geom_bar(stat = "identity", fill = "gray80")+
+  labs(title = "Proportions of explained by PC variance",
+  caption = "Figure 11. Histogram of variance explained by PC1, PC2, PC3, PC4.")+
+  theme_bw()+
+  theme(plot.caption = element_text(hjust = 0))
+```
+
+```{r}
+scor <- scores(mice_pca, display = "species", choices = c(1:4), scaling = 0)
+scor
+```
+
+The maximal score of an original variable in chosen PCs is only `r round(max(abs(scor)), 2)`. Overall protein variable scores are distributed rather evenly among PCs. Biological interpretation of PCA results requires careful consideration of known and potential functions of analyzed proteins.
+```{r, echo=FALSE, fig.height = 0.4, fig.width = 10}
+ggdraw() +
+  draw_label("Loading plot", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+```
+```{r, echo=FALSE}
+biplot(mice_pca, scaling = "species", display = "species", col = "black")
+```
+```{r, echo=FALSE, fig.height = 0.4, fig.width = 10}
+ggdraw() +
+  draw_text("Figure 12. Influences of original variables on first two PCs.", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+```
+
+```{r}
+df_scores <- data.frame(mice_data_complete, scores(mice_pca, display = "sites", choices = c(1, 2, 3), scaling = "sites"))
+
+ggplot(df_scores, aes(x = PC1, y = PC2)) + 
+  geom_point(aes(color = class), size = 2) +
+  coord_equal(xlim = c(-0.7, 0.5), ylim = c(-0.5, 0.6)) + ggtitle(label = "Principal component axis ordination") +
+  scale_colour_brewer(type = "qual", palette = 3) + 
+  labs(caption = "Figure 13. Scatterplot in principal component space.")+
+  theme_bw()+
+  theme(plot.caption = element_text(hjust = 0))
+```
+
+It may be noted that Behavior factor is clearly seen along the PC2 axis: projection of protein expression in stimulated to learn mice is higher than those of control mice.
+
+```{r}
+scatter3D(mice_pca$Ybar[,1], mice_pca$Ybar[,2], mice_pca$Ybar[,3], theta = -65, phi = 20, pch = 19, cex = 0.2, col = "black", bty ="g", main = "PCA of mice data set", xlab = "PC1", ylab ="PC2", zlab = "PC3")
+```
+
+```{r, echo=FALSE, fig.height = 0.4, fig.width = 10}
+ggdraw() +
+  draw_text("Figure 14. Scatter Plot in 3-dimensional principal component space.", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
