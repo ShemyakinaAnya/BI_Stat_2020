@@ -1,0 +1,223 @@
+---
+title: "Survival analysis of ovarian canser dataset"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+```
+
+Libraries required for report's functioning
+```{r}
+library(survival)
+library(ggplot2)
+library(cowplot)
+library(dplyr)
+library(survMisc)
+library(survival)
+library(survminer)
+library(ggfortify)
+library(coin)
+library(ranger)
+```
+
+*Versions of R and packages used:*<br/>
+R version 3.6.3<br/>
+cowplot_1.1.1<br/>
+coin_1.4-1<br/>
+ggfortify_0.4.11<br/>
+ranger_0.12.1<br/>
+survminer_0.4.8<br/>
+ggpubr_0.4.0<br/> 
+survMisc_0.5.5<br/>
+dplyr_1.0.4<br/>
+ggplot2_3.3.3<br/>
+survival_3.2-7<br/>
+
+## Introduction
+
+Data set describes survival in a randomized trial comparing two treatments for ovarian cancer.
+
+Variables:<br/>
+futime:	survival or censoring time<br/>
+fustat:	censoring status<br/>
+age:	in years<br/>
+resid.ds:	residual disease present (1=no, 2=yes)<br/>
+rx:	treatment group (let's say "A" and "B")<br/>
+ecog.ps:	ECOG performance status (1 is better than 2)<br/>
+
+## First-look analysis of data
+
+```{r}
+data("ovarian")
+str(ovarian)
+colSums(is.na(ovarian))
+```
+
+Data set contains the required for survival analysis time and event variables, patient age variable and three variables (resid.ds, rx, ecog.ps) that can be considered as factorial ones. There are 26 patients and no missing data.
+
+```{r}
+ovarian$rx <- factor(ovarian$rx, labels=c("A","B"))
+ovarian$resid.ds <- factor(ovarian$resid.ds, labels=c("No","Yes"))
+ovarian$ecog.ps <- factor(ovarian$ecog.ps, labels=c("better","worse"))
+summary(ovarian)
+```
+
+The groups formed by factorial variables are moderately balanced. Observations were carried out from 59th to 1227th day.
+
+## EDA
+
+
+```{r, echo=FALSE}
+ggplot(ovarian, aes(age)) +
+  geom_histogram(binwidth = 3)+
+  labs(title = "Overall age distribution",
+  caption = "Figure 1. Histogram of patients age variable.")+
+  theme_bw()+
+  theme(plot.caption = element_text(hjust = 0))
+```
+
+
+Let's add factorial age variable with borderline of 55 years.
+
+```{r}
+ovarian <- mutate(ovarian, Age_f = ifelse((age < 55), "LT55", "OV55"), Age_f = factor(Age_f))
+summary(ovarian$Age_f)
+```
+
+The resulted groups are no so well balanced.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+box1 <- ggplot(ovarian, aes(resid.ds, age))+
+  geom_boxplot()+
+  xlab("residual disease present")+
+  theme_bw()
+box2 <- ggplot(ovarian, aes(rx, age))+
+  geom_boxplot()+
+  xlab("treatment group")+
+  theme_bw()
+box3 <- ggplot(ovarian, aes(ecog.ps, age))+
+  geom_boxplot()+
+  xlab("ECOG performance status")+
+  theme_bw()
+box_plots <- plot_grid(box1, box2, box3, nrow = 1, labels = "AUTO")
+box_title <- ggdraw() +
+  draw_label("The variations of patients age by factor variables", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+box_caption <- ggdraw() +
+  draw_text("Figure 2. Box plots of the distributions of patients age by: residual disease present (A); treatment\ngroup (B) and ECOG performance status (C).", x = 0, size = 12, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+plot_grid(box_title, box_plots, box_caption, ncol = 1, rel_heights = c(0.1, 1, 0.1))
+```
+
+There are several outliers in age variables for patients grouped by worse ECOG performance status.
+Patients with residual disease present are older in general.
+
+## Kaplan-Meier Method and Log Rank Test
+
+
+```{r}
+km <- with(ovarian, Surv(futime, fustat))
+km_fit <- survfit(Surv(futime, fustat) ~ 1, data=ovarian)
+ggsurvplot(km_fit, title = "Overall Kaplan-Meir curve", caption = "Figure 3. Main Kaplan-Meir curve of data set")
+```
+
+Overall, during the first half of the study the probability of patients survival/(non-discharge) was decreasing. Then it stabilized at approx. 50%. This curve however does not take into account any groups.
+
+```{r}
+km_rx_fit <- survfit(Surv(futime, fustat) ~ rx, data=ovarian)
+ggsurvplot(km_rx_fit, data = ovarian,
+ title = "Kaplan-Meir curve ~ treatment", 
+ caption = "Figure 4. Kaplan-Meier plots stratified according to treatment factor",
+ conf.int = TRUE,
+ fun = "pct",
+ size = 0.5,
+ linetype = "strata",
+ legend = "bottom",
+ legend.title = "Treatment regime",
+ legend.labs = c("A", "B"))
+```
+
+Patients receiving treatment B are doing better during the first third of the experiment.
+
+```{r}
+km_resid.ds_fit <- survfit(Surv(futime, fustat) ~ resid.ds, data=ovarian)
+ggsurvplot(km_resid.ds_fit, data = ovarian,
+ title = "Kaplan-Meir curve ~ residual disease present", 
+ caption = "Figure 5. Kaplan-Meier plots stratified according to residual disease factor",
+ conf.int = TRUE,
+ fun = "pct",
+ size = 0.5,
+ linetype = "strata",
+ legend = "bottom",
+ legend.title = "Residual disease present",
+ legend.labs = c("no", "yes"))
+```
+
+Patients without residual desease have better chances to survive and the curves diverge early.
+
+```{r}
+km_ecog_fit <- survfit(Surv(futime, fustat) ~ ecog.ps, data=ovarian)
+ggsurvplot(km_ecog_fit, data = ovarian,
+ title = "Kaplan-Meir curve ~ ECOG performance status", 
+ caption = "Figure 6. Kaplan-Meier plots stratified according to ECOG status factor",
+ conf.int = TRUE,
+ fun = "pct",
+ size = 0.5,
+ linetype = "strata",
+ legend = "bottom",
+ legend.title = "ECOG performance status",
+ legend.labs = c("better", "worse"))
+```
+
+It seems there is no significant difference in groups with different ECOG status.
+
+```{r}
+km_Age_fit <- survfit(Surv(futime, fustat) ~ Age_f, data=ovarian)
+ggsurvplot(km_Age_fit, data = ovarian,
+ title = "Kaplan-Meir curve ~ patient age", 
+ caption = "Figure 7. Kaplan-Meier plots stratified according to patient age",
+ conf.int = TRUE,
+ fun = "pct",
+ size = 0.5,
+ linetype = "strata",
+ legend = "bottom",
+ legend.title = "Age",
+ legend.labs = c("less than 55", "over 55"))
+```
+
+As expected, younger patients have a better chance of survival.
+
+For more detailed analysis Log Rank Test is required.
+
+## Log Rank Tests
+
+```{r}
+survdiff(Surv(futime, fustat) ~ rx, data = ovarian)
+logrank_test(Surv(futime, fustat) ~ rx, data = ovarian)
+
+survdiff(Surv(futime, fustat) ~ resid.ds, data = ovarian)
+logrank_test(Surv(futime, fustat) ~ resid.ds, data = ovarian)
+
+survdiff(Surv(futime, fustat) ~ ecog.ps, data = ovarian)
+logrank_test(Surv(futime, fustat) ~ ecog.ps, data = ovarian)
+
+survdiff(Surv(futime, fustat) ~ Age_f, data = ovarian)
+logrank_test(Surv(futime, fustat) ~ Age_f, data = ovarian)
+```
+
+With p-value 0.03 there is a significant difference in survival of two age groups. Other factors do not have such influence on survival probability.
+
+## Cox proportional hazards model
+
+```{r}
+fit.coxph <- coxph(Surv(futime, fustat) ~ rx + resid.ds + Age_f + ecog.ps, data = ovarian)
+ggforest(fit.coxph, data = ovarian)
+```
+
+Hazard ratios (HR) higher than 1 are for residual desease and factorial age variables, indicating an increased risk of death (discharge in our case) if a patient is older than 55 and has a residual desease. Treatment regime B has HR < 1, which indicates a decreased risk compared to group treated with A treatment regime.
+
+The treatment group, residual disease status, and age group variables significantly influence the patients' risk of death in this study. Whereas Kaplan-Meier curves and the log-rank test results estimated the survival probability, the Cox proportional hazards model calculates the risk of death and respective hazard ratios. Thus, survival probability and hazard risk of the same factor can differ in terms of significance.
