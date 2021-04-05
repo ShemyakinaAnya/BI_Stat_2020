@@ -1,0 +1,306 @@
+---
+title: "Graduate school admission. Log regression"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+```
+
+Libraries required for report's functioning
+```{r}
+library(ggplot2)
+library(cowplot)
+library(corrplot)
+library(dplyr)
+library(car)
+library(caret)
+library(ROCR)
+```
+
+*Versions of R and packages used:*<br/>
+R version 3.6.3<br/>
+dplyr_1.0.5<br/>
+car_3.0-10<br/>
+cowplot_1.1.1<br/>
+ggplot2_3.3.3<br/>
+corrplot_0.84<br/>
+caret_6.0-85<br/>
+ROCR_1.0-11<br/>
+
+## Introduction
+
+A researcher is interested in how variables, such as GRE (Graduate Record Exam scores), GPA (grade point average) and prestige of the undergraduate institution (rank), effect admission into graduate school. The response variable, admit/don’t admit, is a binary variable.
+
+## 1. Data processing
+
+### 1.1. Data gathering
+
+```{r}
+grad_sch_data <- read.csv('https://stats.idre.ucla.edu/stat/data/binary.csv')
+str(grad_sch_data)
+colSums(is.na(grad_sch_data))
+```
+
+No missing values.
+
+### 1.2. Correction of variables format
+
+Two variables (admit and rank) should be set as factorial:
+
+```{r}
+grad_sch_data_fact <- grad_sch_data
+grad_sch_data_fact$admit <- factor(grad_sch_data$admit)
+grad_sch_data_fact$rank <- factor(grad_sch_data$rank)
+str(grad_sch_data_fact)
+```
+
+## 2. EDA
+
+```{r, echo=FALSE}
+gr1 <- ggplot(grad_sch_data_fact, aes(rank, fill = admit)) +
+  geom_bar() + 
+  theme_bw()
+gr2 <- ggplot(grad_sch_data_fact, aes(admit)) +
+  geom_bar(fill = "lightpink") + 
+  theme_bw()
+plots1 <- plot_grid(gr1, gr2, nrow = 1, labels = "AUTO")
+title1 <- ggdraw() +
+  draw_label("Counts in factor-based groups", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+caption1 <- ggdraw() +
+  draw_text("Figure 1. Number of observations grouped by factor variables: rank (A) and admission (B).", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+plot_grid(title1, plots1, caption1, ncol = 1, rel_heights = c(0.1, 1, 0.1))
+```
+
+The proportion of students from rank 1 undergraduate institutions that got admitted is more than half, while in other rank institutions the situation is not so rosy. Overall about every third student gets admitted (without taking in account the institution's prestige).
+
+
+```{r, echo=FALSE}
+bp1 <- ggplot(grad_sch_data_fact, aes(admit, gre, fill = admit)) +
+  geom_boxplot() + 
+  xlab("Admission")+
+  ylab("Graduate Record Exam scores")+
+  theme_bw()
+bp2 <- ggplot(grad_sch_data_fact, aes(admit, gpa, fill = admit)) +
+  geom_boxplot() + 
+  xlab("Admission")+
+  ylab("grade point average")+
+  theme_bw()
+plots2 <- plot_grid(bp1, bp2, nrow = 1, labels = "AUTO")
+title2 <- ggdraw() +
+  draw_label("Box plots of numeric values", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+caption2 <- ggdraw() +
+  draw_text("Figure 2. Distribution of numeric variables if grouped by admission factor: gre (A) and gpa (B).", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+plot_grid(title2, plots2, caption2, ncol = 1, rel_heights = c(0.1, 1, 0.1))
+```
+
+The medians of exams score (gre) and average score (gpa) both differ for students grouped by admission variable (with gpa effect looking more pronounced).
+
+```{r, echo=FALSE}
+ggplot(grad_sch_data_fact, aes(x=gre, y=gpa,  color=admit)) +
+  theme_bw()+
+  scale_colour_brewer(type = "qual", palette = 3)+
+  geom_point()+
+  labs(title = "Scatter plot grouped by admission",
+  caption = "Figure 3. Distirution of admission variable on gre-gpa scatter plot")+
+  theme_bw()+
+  theme(plot.caption = element_text(hjust = 0))
+
+ggplot(grad_sch_data_fact, aes(x=gre, y=gpa,  color=rank)) +
+  theme_bw()+
+  scale_colour_brewer(type = "qual", palette = 3)+
+  geom_point()+
+  labs(title = "Scatter plot grouped by institution rank",
+  caption = "Figure 4. Distirution of rank variable on gre-gpa scatter plot")+
+  theme_bw()+
+  theme(plot.caption = element_text(hjust = 0))
+```
+
+Unfortunately, it's hard to say anything about admission or rank distributions looking at figures 3 and 4. It can be only noticed that there's a slight correlation between gre and gpa. 
+
+```{r}
+cor_matrix <- cor(grad_sch_data)
+```
+
+```{r, echo=FALSE, fig.height = 0.3, fig.width = 10}
+ggdraw() +
+  draw_label("Data set correlation matrix", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+```
+
+```{r, echo=FALSE}
+corrplot(cor_matrix, type = "upper", tl.col = "black")
+```
+
+```{r, echo=FALSE, fig.height = 0.3, fig.width = 10}
+ggdraw() +
+  draw_text("Figure 5. Graphical display of a correlation matrix of all variables (factorial variables presented as numeric.", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+```
+
+No significant correlation in data (even for gre-gpa pair), no multicollinearity.
+
+### 3. Logistic Regression Model
+
+```{r make full model}
+model <- glm(admit ~ ., data = grad_sch_data_fact, family=binomial)
+summary(model)
+Anova(model)
+```
+
+All variables are significant, rank being the most significant one.
+
+### 4. Conditions of model applicability
+
+```{r}
+model_diag <- data.frame(.fitted = fitted(model, type = 'response'),
+                        .resid_p = resid(model, type = 'pearson'))
+
+ggplot(model_diag, aes(y = .resid_p, x = .fitted)) + 
+  geom_point() +
+  labs(title = "Linearity evaluation",
+  caption = "Figure 6. Distribution of residues")+
+  theme_bw() +
+  theme(plot.caption = element_text(hjust = 0))+
+  geom_hline(yintercept = 0) +  
+  geom_smooth(method = 'loess')
+```
+
+Guess we'll take it as acceptable.
+
+##### **Overdispersion evaluation:**
+
+```{r}
+# Ben Bolker' function with amendment of additional parameter in NegBin GLMM, matched by MASS :: glm.nb () 
+# source: http://bbolker.github.io/mixedmodels-misc/glmmFAQ.html
+overdisp_fun <- function(model) {
+  rdf <- df.residual(model)
+  if (any(class(model) == 'negbin')) rdf <- rdf - 1
+  rp <- residuals(model,type='pearson')
+  Pearson.chisq <- sum(rp^2)
+  prat <- Pearson.chisq/rdf
+  pval <- pchisq(Pearson.chisq, df=rdf, lower.tail=FALSE)
+  c(chisq=Pearson.chisq,ratio=prat,rdf=rdf,p=pval)
+}
+
+overdisp_fun(model)
+```
+
+P value is too great, thus no reason to reject the null hypothesis. Thus, no significant overdispersion
+
+### 5. Model predictions
+
+
+```{r}
+new_data_gre <- with(grad_sch_data_fact, data.frame(gre = rep(seq(from = 220, to = 800, length.out = 100), 4),
+                                                    gpa = mean(gpa),
+                                                    rank = factor(rep(1:4, each = 100))))
+
+new_data_gpa <- with(grad_sch_data_fact, data.frame(gpa = rep(seq(from = 2.26, to = 4, length.out = 100), 4),
+                                                    gre = mean(gre),
+                                                    rank = factor(rep(1:4, each = 100))))
+
+new_data_rank <- grad_sch_data_fact %>% do(data.frame(gre = mean(.$gre), gpa = mean(.$gpa), rank = factor(1:4)))
+new_data_rank$fit <- predict(model, newdata = new_data_rank, type = "response")
+
+new_data_rank_on_gre <- cbind(new_data_gre, predict(model, newdata = new_data_gre, type = "link", se = TRUE))
+new_data_rank_on_gre <- within(new_data_rank_on_gre, {
+    PredictedProb <- plogis(fit)
+    LL <- plogis(fit - (1.96 * se.fit))
+    UL <- plogis(fit + (1.96 * se.fit))
+})
+
+r_pred1 <- ggplot(new_data_rank_on_gre, aes(x = gre, y = PredictedProb)) +
+  geom_ribbon(aes(ymin = LL, ymax = UL, fill = rank), alpha = 0.2) +
+  geom_line(aes(colour = rank), size = 1)
+
+new_data_rank_on_gpa <- cbind(new_data_gpa, predict(model, newdata = new_data_gpa, type = "link", se = TRUE))
+new_data_rank_on_gpa <- within(new_data_rank_on_gpa, {
+    PredictedProb <- plogis(fit)
+    LL <- plogis(fit - (1.96 * se.fit))
+    UL <- plogis(fit + (1.96 * se.fit))
+})
+
+r_pred2 <- ggplot(new_data_rank_on_gpa, aes(x = gpa, y = PredictedProb)) +
+  geom_ribbon(aes(ymin = LL, ymax = UL, fill = rank), alpha = 0.2) +
+  geom_line(aes(colour = rank), size = 1)
+
+plots4 <- plot_grid(r_pred1, r_pred2)
+title4 <- ggdraw() +
+  draw_label("Model predictions visualization", fontface = 'bold', x = 0, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+caption4 <- ggdraw() +
+  draw_text("Figure 7. Full model predictions with gre (A) and gpa (B) variables set as independable.", x = 0, size = 10, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+plot_grid(title4, plots4, caption4, ncol = 1, rel_heights = c(0.1, 1, 0.1))
+```
+
+Practically no difference, huh
+
+### 6. Prediction evaluation
+
+Let's draw ROC curve
+
+```{r}
+grad_sch_data_fact$fit  <- predict(model, type = "response")
+pred_fit <- prediction(grad_sch_data_fact$fit, grad_sch_data_fact$admit)
+perf_fit <- performance(pred_fit,"tpr","fpr")
+plot(perf_fit, print.cutoffs.at = seq(0,1, by=0.1), main = "ROC curve")
+```
+```{r, echo=FALSE, fig.height = 0.3, fig.width = 10}
+ggdraw() +
+  draw_text("Figure 8. Receiver Operating Characteristic curve for full model.", x = 0, size = 12, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+```
+
+```{r}
+auc  <- performance(pred_fit, measure = "auc")
+str(auc)
+```
+
+The area under the curve is 0.69. Nothing much, but still more than 0.5.
+
+```{r}
+perf3  <- performance(pred_fit, x.measure = "cutoff", measure = "spec")
+perf4  <- performance(pred_fit, x.measure = "cutoff", measure = "sens")
+perf5  <- performance(pred_fit, x.measure = "cutoff", measure = "acc")
+
+plot(perf3, col = "red", lwd =2, main = "Specificity, sensitivity and accuracy curves")
+plot(add=T, perf4 , col = "green", lwd =2)
+plot(add=T, perf5, lwd =2)
+
+legend(x = 0.6,y = 0.3, c("specificity", "sensitivity", "accuracy"), 
+       lty = 1, col =c('red', 'green', 'black'), bty = 'n', cex = 1, lwd = 2)
+
+abline(v= 0.321, lwd = 2)
+```
+```{r, echo=FALSE, fig.height = 0.3, fig.width = 10}
+ggdraw() +
+  draw_text("Figure 8. Receiver Operating Characteristic curve for full model.", x = 0, size = 12, hjust = 0)+
+  theme(plot.margin = margin(0, 0, 0, 7))
+```
+
+Optimal cutoff to define binary outcome from probability - 0.321. It shows that the chance to get admitted is less than 50%, as even a 30% probability lets students hope for admission.
+
+### 7. Interpretaion
+
+```{r}
+summary(model)
+```
+
+The following equation fits the model.<br/>
+
+log(p/1−p) = y = -3.99 + 0.002*gre + 0.804∗gpa -0.675∗rank2 − 1.34∗Rank3 − 1.55∗rank4<br/>
+
+p is the probability of a student being admitted.
+
+The logistic regression coefficients give the change in the log odds of the outcome for a one unit increase in the predictor variable:<br/>
+* If Graduate Record Exam score increases by one unit, the log odds of admission (versus non-admission) increases by 0.002.<br/>
+* If grade point average increases by one unit, the log odds of being admitted to graduate school increases by 0.804.<br/>
+* As for rank, the effect of attending ranks 2,3 and 4 institution can be only accessed versus attending rank 1 institution: for example, having attended institution with rank 2 changes the log odds of admission by -0.675 compared to having attended rank 1 institution. That is, if you attended rank 3 institution, your chance to get admitted in graduate school is e^(-1.34) - 0.26 times greater or 3,8 times lower, than if you had admitted first rank institution. 
+
+It may be noticed that gre coefficient is very low. The reason is the fact that the range of gre variable is much larger than gpa variable, for example. As we've seen in model's summary, gre significance is sufficient for the model.
